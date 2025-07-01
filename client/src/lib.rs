@@ -1,12 +1,20 @@
+//! # Solana Client Library
+//!
+//! This crate provides a high-level client interface for interacting with the Solana blockchain.
+//! It serves as a unified entry point that abstracts various connection protocols (UDP/QUIC)
+//! and provides both blocking and non-blocking APIs for transaction submission and blockchain queries.
+
 #![allow(clippy::arithmetic_side_effects)]
 
-pub mod connection_cache;
-pub mod nonblocking;
-pub mod send_and_confirm_transactions_in_parallel;
-pub mod thin_client;
-pub mod tpu_client;
-pub mod transaction_executor;
+// Core client components for blockchain interaction
+pub mod connection_cache;         // Connection pooling and protocol management (UDP/QUIC)
+pub mod nonblocking;             // Async versions of client components
+pub mod send_and_confirm_transactions_in_parallel; // Optimized batch transaction processing
+pub mod thin_client;             // Lightweight client combining RPC + TPU
+pub mod tpu_client;              // Direct TPU communication for high-performance tx submission
+pub mod transaction_executor;    // Batch transaction processing with retry logic
 
+// Re-export mock functionality for CLI testing
 pub use solana_rpc_client::mock_sender_for_cli;
 
 pub mod blockhash_query {

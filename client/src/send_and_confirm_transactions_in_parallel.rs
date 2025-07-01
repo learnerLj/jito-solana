@@ -1,3 +1,42 @@
+//! # Parallel Transaction Processing Module
+//!
+//! This module provides advanced parallel transaction processing capabilities with
+//! automatic confirmation tracking, retry logic, and optimized batch handling.
+//! It's designed for high-throughput scenarios where many transactions need to be
+//! processed concurrently with reliable confirmation guarantees.
+//!
+//! ## Key Features
+//!
+//! - **Parallel Processing**: Concurrent transaction submission and confirmation
+//! - **Automatic Retry Logic**: Smart retry mechanisms with exponential backoff
+//! - **Blockhash Management**: Automatic blockhash refresh to prevent expiration
+//! - **Progress Tracking**: Visual progress indicators for long-running operations
+//! - **Error Handling**: Comprehensive error reporting per transaction
+//! - **Fallback Strategies**: RPC fallback when TPU submission fails
+//!
+//! ## Architecture
+//!
+//! The module uses several concurrent tasks:
+//! 1. **Blockhash Updater**: Continuously refreshes blockhashes to prevent expiration
+//! 2. **Transaction Submitter**: Sends signed transactions to validators
+//! 3. **Confirmation Tracker**: Monitors transaction status and handles confirmations
+//! 4. **Retry Handler**: Manages retries for failed or expired transactions
+//!
+//! ## Performance Optimizations
+//!
+//! - Staggered transaction submission to avoid network congestion
+//! - Batch status queries to reduce RPC load
+//! - Efficient connection pooling with protocol selection (UDP/QUIC)
+//! - Parallel confirmation tracking across multiple validator endpoints
+//!
+//! ## Usage Patterns
+//!
+//! This module is ideal for:
+//! - Bulk transaction processing (airdrops, batch payments)
+//! - High-frequency trading applications
+//! - DeFi protocols requiring reliable transaction execution
+//! - Any scenario requiring guaranteed transaction confirmation
+
 use {
     crate::{
         nonblocking::{rpc_client::RpcClient, tpu_client::TpuClient},
@@ -31,45 +70,75 @@ use {
     tokio::{sync::RwLock, task::JoinHandle},
 };
 
-const BLOCKHASH_REFRESH_RATE: Duration = Duration::from_secs(5);
-const SEND_INTERVAL: Duration = Duration::from_millis(10);
-// This is a "reasonable" constant for how long it should
-// take to fan the transactions out, taken from
-// `solana_tpu_client::nonblocking::tpu_client::send_wire_transaction_futures`
+// Timing constants for optimal performance and reliability
+const BLOCKHASH_REFRESH_RATE: Duration = Duration::from_secs(5);  // How often to refresh blockhashes
+const SEND_INTERVAL: Duration = Duration::from_millis(10);        // Delay between individual tx sends
+/// Timeout for TPU transaction fanout operations.
+/// 
+/// This "reasonable" constant represents the maximum time allowed for transaction
+/// distribution across multiple TPU endpoints. Derived from empirical testing
+/// in `solana_tpu_client::nonblocking::tpu_client::send_wire_transaction_futures`.
 const SEND_TIMEOUT_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Type alias for QUIC-based TPU client used throughout this module.
+/// QUIC provides better performance than UDP for high-volume transaction processing.
 type QuicTpuClient = TpuClient<QuicPool, QuicConnectionManager, QuicConfig>;
 
+/// Internal data structure for tracking individual transactions during processing.
+///
+/// This structure contains all necessary information to manage a transaction's
+/// lifecycle from submission through confirmation or timeout.
 #[derive(Clone, Debug)]
 struct TransactionData {
+    /// Block height after which this transaction becomes invalid
     last_valid_block_height: u64,
+    /// Original message used to recreate the transaction if needed
     message: Message,
+    /// Original index in the input batch for error reporting
     index: usize,
+    /// Pre-serialized transaction bytes for efficient retransmission
     serialized_transaction: Vec<u8>,
 }
 
+/// Cached blockhash information for transaction signing.
+///
+/// This structure is updated regularly by the background blockhash refresh task
+/// to ensure transactions always use valid, recent blockhashes.
 #[derive(Clone, Debug, Copy)]
 struct BlockHashData {
+    /// Current blockhash for transaction signing
     pub blockhash: Hash,
+    /// Block height after which this blockhash expires
     pub last_valid_block_height: u64,
 }
 
-// Deprecated struct to maintain backward compatibility
+/// Legacy configuration structure for backward compatibility.
+///
+/// This struct is deprecated in favor of `SendAndConfirmConfigV2` which provides
+/// additional configuration options including RPC transaction submission settings.
 #[deprecated(
     since = "2.2.0",
     note = "Use SendAndConfirmConfigV2 with send_and_confirm_transactions_in_parallel_v2"
 )]
 #[derive(Clone, Debug, Copy)]
 pub struct SendAndConfirmConfig {
+    /// Whether to display a progress spinner during processing
     pub with_spinner: bool,
+    /// Optional limit on how many times to re-sign transactions with new blockhashes
     pub resign_txs_count: Option<usize>,
 }
 
-// New struct with RpcSendTransactionConfig for non-breaking change
+/// Enhanced configuration structure with comprehensive RPC settings.
+///
+/// This is the current configuration struct that should be used for new code.
+/// It extends the legacy config with detailed RPC transaction submission options.
 #[derive(Clone, Debug, Copy)]
 pub struct SendAndConfirmConfigV2 {
+    /// Whether to display a progress spinner during processing
     pub with_spinner: bool,
+    /// Optional limit on transaction re-signing attempts with fresh blockhashes
     pub resign_txs_count: Option<usize>,
+    /// Detailed configuration for RPC transaction submission (preflight, encoding, etc.)
     pub rpc_send_transaction_config: RpcSendTransactionConfig,
 }
 
@@ -225,13 +294,24 @@ fn create_transaction_confirmation_task(
     })
 }
 
+/// Shared context for coordinating parallel transaction processing.
+///
+/// This structure contains all shared state needed to coordinate between
+/// the various async tasks handling transaction submission, confirmation,
+/// and status tracking.
 #[derive(Clone, Debug)]
 struct SendingContext {
+    /// Map of pending transactions awaiting confirmation, keyed by signature
     unconfirmed_transaction_map: Arc<DashMap<Signature, TransactionData>>,
+    /// Map of transaction errors, keyed by original batch index
     error_map: Arc<DashMap<usize, TransactionError>>,
+    /// Current blockhash data for transaction signing
     blockhash_data_rw: Arc<RwLock<BlockHashData>>,
+    /// Running count of confirmed transactions for progress tracking
     num_confirmed_transactions: Arc<AtomicUsize>,
+    /// Total number of transactions being processed
     total_transactions: usize,
+    /// Current blockchain height for timeout detection
     current_block_height: Arc<AtomicU64>,
 }
 fn progress_from_context_and_block_height(
@@ -487,11 +567,42 @@ async fn send_staggered_transactions(
     join_all(futures).await;
 }
 
-/// Sends and confirms transactions concurrently
+/// Processes transactions in parallel with comprehensive confirmation tracking.
 ///
-/// The sending and confirmation of transactions is done in parallel tasks
-/// The method signs transactions just before sending so that blockhash does not
-/// expire.
+/// This is the main entry point for high-performance transaction processing.
+/// It coordinates multiple async tasks to handle transaction submission,
+/// confirmation tracking, and retry logic with optimal efficiency.
+///
+/// ## Process Flow
+///
+/// 1. **Pre-flight validation**: Verify all messages can be signed
+/// 2. **Background task setup**: Start blockhash refresh and confirmation tracking
+/// 3. **Batch processing**: Sign and submit transactions in parallel
+/// 4. **Confirmation monitoring**: Track transaction status until confirmed or expired
+/// 5. **Retry logic**: Re-sign and resubmit expired transactions with fresh blockhashes
+///
+/// ## Performance Features
+///
+/// - **Staggered submission**: Prevents network congestion
+/// - **Batch confirmation**: Efficient status queries for multiple transactions
+/// - **TPU + RPC hybrid**: Uses TPU for speed, RPC for reliability
+/// - **Smart retries**: Only retries transactions that may still succeed
+///
+/// # Arguments
+/// * `rpc_client` - RPC client for blockchain queries and fallback submission
+/// * `tpu_client` - Optional TPU client for high-performance transaction submission
+/// * `messages` - Array of messages to process as transactions
+/// * `signers` - Collection of signers for transaction authorization
+/// * `config` - Configuration parameters for processing behavior
+///
+/// # Returns
+/// Vector of optional transaction errors (None = success, Some(err) = failure)
+///
+/// # Errors
+/// Returns error if:
+/// - Initial blockhash fetch fails
+/// - Message signing validation fails
+/// - Maximum retry attempts exceeded
 pub async fn send_and_confirm_transactions_in_parallel_v2<T: Signers + ?Sized>(
     rpc_client: Arc<RpcClient>,
     tpu_client: Option<QuicTpuClient>,
