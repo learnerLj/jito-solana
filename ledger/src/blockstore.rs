@@ -1,6 +1,53 @@
-//! The `blockstore` module provides functions for parallel verification of the
-//! Proof of History ledger as well as iterative read, append write, and random
-//! access read to a persistent file-based ledger.
+//! Blockstore - Primary Blockchain Data Storage Engine
+//! 
+//! The blockstore module implements Solana's primary storage engine for blockchain data,
+//! providing high-performance persistent storage, data integrity verification, and efficient
+//! access patterns for all blockchain operations. Built on RocksDB, it handles the storage
+//! and retrieval of shreds, transactions, blocks, and metadata with fault tolerance.
+//! 
+//! ## Key Features
+//! 
+//! - **High-Performance Storage**: RocksDB-based persistent storage optimized for blockchain workloads
+//! - **Data Integrity**: Reed-Solomon erasure coding and cryptographic verification
+//! - **Parallel Processing**: Multi-threaded shred processing and validation
+//! - **Efficient Indexing**: Fast lookups by slot, signature, address, and transaction
+//! - **Fork Management**: Handles blockchain forks and consensus resolution
+//! - **Real-time Events**: Integration with consensus and validation processes
+//! 
+//! ## Core Responsibilities
+//! 
+//! - Store and retrieve shreds (data units) with erasure coding for fault tolerance
+//! - Validate blockchain data integrity through cryptographic verification
+//! - Manage slot metadata and transaction indexing for efficient access
+//! - Process blocks and entries for consensus and state transitions
+//! - Handle duplicate detection and conflict resolution
+//! - Provide iterators for blockchain traversal and analysis
+//! 
+//! ## Storage Architecture
+//! 
+//! The blockstore uses RocksDB column families to organize different data types:
+//! - **Data Shreds**: Transaction data with Reed-Solomon coding
+//! - **Code Shreds**: Erasure coding data for fault recovery
+//! - **Slot Metadata**: Information about slot completion and integrity
+//! - **Transaction Index**: Fast lookup by transaction signature
+//! - **Address Index**: Account-based transaction history
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Initialize blockstore
+//! let blockstore = Blockstore::open(&ledger_path)?;
+//! 
+//! // Store shreds with validation
+//! let insert_results = blockstore.insert_shreds(shreds, &leader_schedule, false)?;
+//! 
+//! // Retrieve complete blocks
+//! let block = blockstore.get_rooted_block(slot, true)?;
+//! 
+//! // Check slot completion
+//! let slot_meta = blockstore.meta(slot)?;
+//! let is_complete = slot_meta.is_connected();
+//! ```
 
 use {
     crate::{

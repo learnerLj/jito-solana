@@ -1,3 +1,46 @@
+//! Slot Statistics - Performance Monitoring and Analysis for Blockchain Slots
+//! 
+//! This module provides comprehensive statistics collection and analysis for individual
+//! blockchain slots, tracking shred reception patterns, recovery operations, and slot
+//! completion metrics. The statistics are essential for monitoring validator performance,
+//! diagnosing network issues, and optimizing shred distribution strategies.
+//! 
+//! ## Core Functionality
+//! 
+//! - **Shred Source Tracking**: Monitors how shreds arrive (turbine, repair, recovery)
+//! - **FEC Set Analysis**: Tracks forward error correction performance across sets
+//! - **Completion Metrics**: Measures slot completion patterns and timing
+//! - **Performance Monitoring**: Provides detailed insights into slot processing efficiency
+//! - **Cache Management**: LRU-based caching for recent slot statistics
+//! 
+//! ## Statistics Categories
+//! 
+//! - **Turbine Reception**: Shreds received through normal gossip turbine protocol
+//! - **Repair Operations**: Shreds obtained through targeted repair requests
+//! - **Recovery Success**: Shreds reconstructed using Reed-Solomon erasure coding
+//! - **Slot State Flags**: Dead, full, and rooted status tracking
+//! 
+//! ## Performance Insights
+//! 
+//! The statistics help identify:
+//! - Network connectivity issues affecting shred reception
+//! - Validator performance problems in slot processing
+//! - Erasure coding effectiveness for data recovery
+//! - Optimal turbine tree positioning for improved reception
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Track shred reception
+//! slots_stats.record_shred(slot, ShredSource::Turbine, false);
+//! 
+//! // Mark slot completion
+//! slots_stats.mark_full(slot, last_index);
+//! 
+//! // Generate performance report
+//! slots_stats.report_slot(slot);
+//! ```
+
 use {
     crate::blockstore_meta::SlotMeta,
     bitflags::bitflags,
@@ -9,30 +52,60 @@ use {
     },
 };
 
+/// Maximum number of slot statistics to maintain in the LRU cache
+/// 
+/// This capacity balances memory usage with the need to track recent slot
+/// performance. The cache covers approximately 2-3 minutes of slots at
+/// normal network speeds, providing adequate history for analysis.
 const SLOTS_STATS_CACHE_CAPACITY: usize = 300;
 
+/// Source classification for received shreds
+/// 
+/// Tracks how each shred was obtained to analyze network performance
+/// and validator connectivity patterns. This information is crucial
+/// for optimizing shred distribution and identifying network issues.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ShredSource {
+    /// Shred received through normal gossip turbine protocol
     Turbine,
+    /// Shred obtained through targeted repair request to specific validator
     Repaired,
+    /// Shred reconstructed using Reed-Solomon erasure coding from other shreds
     Recovered,
 }
 
 bitflags! {
+    /// Status flags tracking slot lifecycle state
+    /// 
+    /// Efficient bit-packed representation of slot status for memory
+    /// optimization and fast status queries during statistics collection.
     #[derive(Copy, Clone, Default)]
     struct SlotFlags: u8 {
+        /// Slot marked as dead due to irrecoverable data loss or corruption
         const DEAD   = 0b00000001;
+        /// Slot contains all required shreds and is complete
         const FULL   = 0b00000010;
+        /// Slot has been finalized by network consensus (rooted)
         const ROOTED = 0b00000100;
     }
 }
 
+/// Comprehensive statistics for an individual blockchain slot
+/// 
+/// Collects detailed metrics about shred reception, error correction performance,
+/// and slot completion patterns. These statistics enable performance monitoring,
+/// network analysis, and optimization of validator operations.
 #[derive(Clone, Default)]
 pub struct SlotStats {
+    /// Count of shreds received per FEC set through turbine protocol
     turbine_fec_set_index_counts: HashMap</*fec_set_index*/ u32, /*count*/ usize>,
+    /// Total number of shreds obtained through repair operations
     num_repaired: usize,
+    /// Total number of shreds recovered using erasure coding
     num_recovered: usize,
+    /// Highest shred index observed for this slot
     last_index: u64,
+    /// Current slot lifecycle status flags
     flags: SlotFlags,
 }
 

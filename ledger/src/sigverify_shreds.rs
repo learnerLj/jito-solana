@@ -1,3 +1,44 @@
+//! Shred Signature Verification - Cryptographic Validation for Blockchain Security
+//! 
+//! This module implements high-performance cryptographic signature verification for shreds,
+//! providing both CPU and GPU-accelerated validation to ensure data authenticity and prevent
+//! malicious data injection into the blockchain. It serves as a critical security layer
+//! that validates all incoming shreds before they are processed or stored.
+//! 
+//! ## Key Security Functions
+//! 
+//! - **Signature Verification**: Validates Ed25519 signatures on all incoming shreds
+//! - **Leader Authentication**: Verifies shreds originate from authorized slot leaders
+//! - **Merkle Root Validation**: Ensures data integrity through cryptographic hashing
+//! - **Duplicate Detection**: Prevents replay attacks and duplicate shred processing
+//! - **Batch Processing**: Optimized verification for high-throughput scenarios
+//! 
+//! ## Performance Optimizations
+//! 
+//! - **CPU Vectorization**: SIMD instructions for parallel signature verification
+//! - **GPU Acceleration**: CUDA-based batch verification for maximum throughput
+//! - **LRU Caching**: Recently verified signatures cached to avoid redundant computation
+//! - **Thread Pool**: Parallel processing across multiple CPU cores
+//! - **Memory Pooling**: Recycled buffers to minimize allocation overhead
+//! 
+//! ## Verification Process
+//! 
+//! 1. **Shred Parsing**: Extract signature, public key, and message from packet
+//! 2. **Leader Validation**: Confirm signer is authorized leader for the slot
+//! 3. **Cache Lookup**: Check if signature has been recently verified
+//! 4. **Cryptographic Verification**: Validate Ed25519 signature against message
+//! 5. **Merkle Validation**: Verify Merkle root consistency for data integrity
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Verify single shred with CPU
+//! let valid = verify_shred_cpu(packet, &slot_leaders, &cache);
+//! 
+//! // Batch verify multiple shreds with GPU acceleration
+//! let results = verify_shreds_gpu(packets, &slot_leaders, &cache, recycler);
+//! ```
+
 #![allow(clippy::implicit_hasher)]
 use {
     crate::shred::{self, SignedData, SIZE_OF_MERKLE_ROOT},
@@ -36,8 +77,38 @@ use {
 #[cfg(test)]
 const SIGN_SHRED_GPU_MIN: usize = 256;
 
+/// LRU cache for recently verified shred signatures
+/// 
+/// Caches successful signature verifications using a composite key of:
+/// - Signature: The Ed25519 signature to verify
+/// - Pubkey: The public key of the signer (slot leader)
+/// - Hash: The Merkle root for data integrity validation
+/// 
+/// This prevents redundant cryptographic operations for recently seen shreds,
+/// significantly improving performance during network congestion or replay scenarios.
 pub type LruCache = lazy_lru::LruCache<(Signature, Pubkey, /*merkle root:*/ Hash), ()>;
 
+/// Verify a single shred's cryptographic signature using CPU
+/// 
+/// Performs comprehensive validation of a shred packet including signature verification,
+/// leader authentication, and cache management. This function provides the core security
+/// validation for individual shreds received from the network.
+/// 
+/// # Arguments
+/// * `packet` - The network packet containing the shred data
+/// * `slot_leaders` - Mapping of slots to their authorized leader public keys
+/// * `cache` - LRU cache of recently verified signatures for performance
+/// 
+/// # Returns
+/// `true` if the shred passes all validation checks, `false` otherwise
+/// 
+/// # Security Validation Steps
+/// 1. Check packet is not marked for discard
+/// 2. Parse shred structure and extract cryptographic components
+/// 3. Validate slot leader authorization
+/// 4. Check signature cache for recent verification
+/// 5. Perform Ed25519 signature verification
+/// 6. Update cache with successful verification
 #[must_use]
 pub fn verify_shred_cpu(
     packet: PacketRef,

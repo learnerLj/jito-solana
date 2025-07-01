@@ -1,3 +1,50 @@
+//! BigTable Upload - Cloud Archival Integration for Ledger Data
+//! 
+//! This module implements high-performance upload functionality for archiving Solana
+//! blockchain data to Google Cloud BigTable, providing long-term storage, backup,
+//! and analytics capabilities. The upload system is designed for efficient batch
+//! processing while maintaining data integrity and minimizing impact on validator performance.
+//! 
+//! ## Core Functionality
+//! 
+//! - **Block Upload**: Efficient transfer of confirmed blocks to cloud storage
+//! - **Parallel Processing**: Concurrent uploads for maximum throughput
+//! - **Read-Ahead Optimization**: Intelligent prefetching to minimize I/O latency
+//! - **Deduplication**: Avoids redundant uploads of already-archived data
+//! - **Progress Tracking**: Comprehensive monitoring of upload operations
+//! 
+//! ## Performance Optimizations
+//! 
+//! - **Batch Processing**: Groups multiple blocks for efficient network utilization
+//! - **Parallel Uploads**: Configurable concurrency based on system resources
+//! - **Read-Ahead Pipeline**: Overlaps block reading with upload operations
+//! - **Connection Pooling**: Reuses network connections for reduced overhead
+//! - **Compression**: Optimizes data transfer size and storage costs
+//! 
+//! ## Configuration Options
+//! 
+//! - **Parallel Workers**: Number of concurrent upload threads
+//! - **Read-Ahead Depth**: Pipeline depth for block prefetching
+//! - **Batch Size**: Number of blocks processed in each upload batch
+//! - **Force Reupload**: Option to override existing data in cloud storage
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Configure upload parameters
+//! let config = ConfirmedBlockUploadConfig {
+//!     num_blocks_to_upload_in_parallel: 8,
+//!     block_read_ahead_depth: 16,
+//!     force_reupload: false,
+//!     max_num_slots_to_check: 32,
+//! };
+//! 
+//! // Upload block range to BigTable
+//! let last_slot = upload_confirmed_blocks(
+//!     blockstore, bigtable, starting_slot, ending_slot, config, exit
+//! ).await?;
+//! ```
+
 use {
     crate::blockstore::Blockstore,
     crossbeam_channel::{bounded, unbounded},
@@ -16,12 +63,21 @@ use {
     },
 };
 
+/// Configuration for confirmed block upload operations to BigTable
+/// 
+/// Defines parameters for optimizing upload performance, controlling resource usage,
+/// and managing the upload pipeline behavior. All settings can be tuned based on
+/// system capabilities and network conditions.
 #[derive(Clone)]
 pub struct ConfirmedBlockUploadConfig {
+    /// Force re-upload of blocks that already exist in BigTable storage
     pub force_reupload: bool,
+    /// Maximum number of slot positions to scan during upload operations
     pub max_num_slots_to_check: usize,
+    /// Number of blocks to upload concurrently for parallel processing
     pub num_blocks_to_upload_in_parallel: usize,
-    pub block_read_ahead_depth: usize, // should always be >= `num_blocks_to_upload_in_parallel`
+    /// Read-ahead pipeline depth for block prefetching (must be >= parallel uploads)
+    pub block_read_ahead_depth: usize,
 }
 
 impl Default for ConfirmedBlockUploadConfig {
@@ -36,14 +92,40 @@ impl Default for ConfirmedBlockUploadConfig {
     }
 }
 
+/// Performance statistics for blockstore read operations during upload
+/// 
+/// Tracks metrics for monitoring and optimizing the block reading pipeline
+/// that feeds data to the upload workers.
 struct BlockstoreLoadStats {
+    /// Total number of blocks successfully read from blockstore
     pub num_blocks_read: usize,
+    /// Total time elapsed during block reading operations
     pub elapsed: Duration,
 }
 
-/// Uploads a range of blocks from a Blockstore to bigtable LedgerStorage
-/// Returns the Slot of the last block checked. If no blocks in the range `[staring_slot,
-/// ending_slot]` are found in Blockstore, this value is equal to `ending_slot`.
+/// Upload a range of confirmed blocks from blockstore to BigTable cloud storage
+/// 
+/// Efficiently transfers blockchain data to Google Cloud BigTable for long-term
+/// archival, backup, and analytics. The function implements optimized batch
+/// processing with configurable parallelism and intelligent deduplication.
+/// 
+/// # Arguments
+/// * `blockstore` - Source blockstore containing blockchain data to upload
+/// * `bigtable` - Destination BigTable storage client for cloud archival
+/// * `starting_slot` - First slot in the range to upload (inclusive)
+/// * `ending_slot` - Last slot in the range to upload (inclusive) 
+/// * `config` - Upload configuration parameters for performance tuning
+/// * `exit` - Atomic flag for graceful cancellation of upload operations
+/// 
+/// # Returns
+/// The slot number of the last block successfully processed. If no blocks
+/// are found in the specified range, returns `ending_slot`.
+/// 
+/// # Performance
+/// - Uses parallel workers for concurrent uploads
+/// - Implements read-ahead pipeline for optimal I/O
+/// - Avoids redundant uploads through existence checking
+/// - Provides progress monitoring and error recovery
 pub async fn upload_confirmed_blocks(
     blockstore: Arc<Blockstore>,
     bigtable: solana_storage_bigtable::LedgerStorage,

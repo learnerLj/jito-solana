@@ -1,8 +1,32 @@
-//! The `blockstore_cleanup_service` drops older ledger data to limit disk space usage.
-//! The service works by counting the number of live data shreds in the ledger; this
-//! can be done quickly and should have a fairly stable correlation to actual bytes.
-//! Once the shred count (and thus roughly the byte count) reaches a threshold,
-//! the services begins removing data in FIFO order.
+//! Blockstore Cleanup Service - Automated Ledger Data Lifecycle Management
+//! 
+//! The blockstore cleanup service implements automated disk space management for validator
+//! ledger data, preventing unbounded storage growth while maintaining sufficient history
+//! for consensus operations and snapshot recovery. The service uses intelligent heuristics
+//! to balance storage efficiency with operational requirements.
+//! 
+//! ## Core Functionality
+//! 
+//! - **Automatic Cleanup**: Proactive removal of old ledger data based on configurable thresholds
+//! - **Storage Monitoring**: Continuous tracking of shred count as a proxy for disk usage
+//! - **FIFO Purging**: Oldest data removed first to maintain chronological consistency
+//! - **Threshold Management**: Configurable limits prevent both storage exhaustion and premature cleanup
+//! - **Performance Optimization**: Efficient cleanup operations that don't impact consensus performance
+//! 
+//! ## Storage Strategy
+//! 
+//! The service uses shred count estimation for storage management:
+//! - **Fast Counting**: Shred count provides quick estimation of actual storage usage
+//! - **Stable Correlation**: Predictable relationship between shred count and disk bytes
+//! - **Threshold Triggering**: Cleanup begins when shred count exceeds configured maximum
+//! - **Graduated Removal**: Data removed in chunks to avoid sudden storage gaps
+//! 
+//! ## Default Configuration
+//! 
+//! - **Maximum Shreds**: 200M shreds (~400GB typical storage)
+//! - **Minimum Shreds**: 50M shreds (~100GB minimum retention)
+//! - **Cleanup Interval**: Every 512 slots to balance overhead with responsiveness
+//! - **Safety Margins**: Conservative thresholds ensure adequate history for recovery
 
 use {
     crate::blockstore::{
@@ -23,28 +47,46 @@ use {
     },
 };
 
-// - To try and keep the RocksDB size under 400GB:
-//   Seeing about 1600b/shred, using 2000b/shred for margin, so 200m shreds can be stored in 400gb.
-//   at 5k shreds/slot at 50k tps, this is 40k slots (~4.4 hours).
-//   At idle, 60 shreds/slot this is about 3.33m slots (~15 days)
-// This is chosen to allow enough time for
-// - A validator to download a snapshot from a peer and boot from it
-// - To make sure that if a validator needs to reboot from its own snapshot, it has enough slots locally
-//   to catch back up to where it was when it stopped
+/// Default maximum number of shreds to retain in the ledger
+/// 
+/// Calculated to keep RocksDB size under 400GB:
+/// - Observed ~1600 bytes/shred, using 2000 bytes/shred for safety margin
+/// - 200M shreds × 2000 bytes ≈ 400GB storage capacity
+/// - At 5K shreds/slot (50K TPS): ~40K slots (~4.4 hours of high load)
+/// - At 60 shreds/slot (idle): ~3.33M slots (~15 days of idle operation)
+/// 
+/// This threshold ensures sufficient time for:
+/// - Validator snapshot download and bootstrap from peer
+/// - Local snapshot recovery with adequate catch-up history
+/// - Network partition recovery without data loss
 pub const DEFAULT_MAX_LEDGER_SHREDS: u64 = 200_000_000;
 
-// Allow down to 50m, or 3.5 days at idle, 1hr at 50k load, around ~100GB
+/// Minimum allowable maximum shred count for ledger retention
+/// 
+/// Conservative lower bound ensuring adequate history retention:
+/// - 50M shreds ≈ 100GB minimum storage requirement
+/// - At idle (60 shreds/slot): ~3.5 days of blockchain history
+/// - At high load (5K shreds/slot): ~1 hour of blockchain history
+/// 
+/// This minimum prevents overly aggressive cleanup that could compromise
+/// validator recovery capabilities or consensus participation.
 pub const DEFAULT_MIN_MAX_LEDGER_SHREDS: u64 = 50_000_000;
 
-// Perform blockstore cleanup at this interval to limit the overhead of cleanup
-// Cleanup will be considered after the latest root has advanced by this value
+/// Slot interval for triggering blockstore cleanup operations
+/// 
+/// Cleanup is considered only after the latest root has advanced by this value,
+/// limiting cleanup overhead while ensuring timely space management. The interval
+/// balances cleanup responsiveness with operational efficiency.
 const DEFAULT_CLEANUP_SLOT_INTERVAL: u64 = 512;
-// The above slot interval can be roughly equated to a time interval. So, scale
-// how often we check for cleanup with the interval. Doing so will avoid wasted
-// checks when we know that the latest root could not have advanced far enough
-//
-// Given that the timing of new slots/roots is not exact, divide by 10 to avoid
-// a long wait incase a check occurs just before the interval has elapsed
+
+/// Time-based loop limiting for cleanup service efficiency
+/// 
+/// Converts slot interval to time interval to avoid wasteful cleanup checks
+/// when the latest root cannot have advanced sufficiently. The duration is
+/// divided by 10 to account for timing variations and prevent excessive delays
+/// when checks occur near interval boundaries.
+/// 
+/// Calculation: (512 slots × 400ms/slot) ÷ 10 ≈ 20.5 seconds between checks
 const LOOP_LIMITER: Duration =
     Duration::from_millis(DEFAULT_CLEANUP_SLOT_INTERVAL * DEFAULT_MS_PER_SLOT / 10);
 

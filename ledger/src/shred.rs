@@ -1,6 +1,30 @@
-//! The `shred` module defines data structures and methods to pull MTU sized data frames from the
-//! network. There are two types of shreds: data and coding. Data shreds contain entry information
-//! while coding shreds provide redundancy to protect against dropped network packets (erasures).
+//! Shred - Fundamental Blockchain Data Units with Erasure Coding
+//! 
+//! The shred module defines the fundamental data structures for Solana's blockchain storage,
+//! implementing MTU-sized data frames optimized for network transmission with fault tolerance.
+//! Shreds are the atomic units of blockchain data that enable parallel processing, network
+//! efficiency, and data recovery through Reed-Solomon erasure coding.
+//! 
+//! ## Shred Types
+//! 
+//! **Data Shreds**: Contain actual blockchain data (transactions, entries, and metadata)
+//! **Coding Shreds**: Provide redundancy through Reed-Solomon erasure coding for data recovery
+//! 
+//! ## Key Features
+//! 
+//! - **Network Optimized**: MTU-sized packets for efficient network transmission
+//! - **Fault Tolerance**: Reed-Solomon erasure coding enables recovery from packet loss
+//! - **Parallel Processing**: Independent shreds enable concurrent validation and storage
+//! - **Data Integrity**: Cryptographic signatures and Merkle trees ensure authenticity
+//! - **Efficient Encoding**: Optimal balance between redundancy and storage efficiency
+//! 
+//! ## Erasure Coding Architecture
+//! 
+//! Solana uses systematic Reed-Solomon codes where:
+//! - Original data shreds remain unchanged (systematic property)
+//! - Additional coding shreds provide redundancy for recovery
+//! - Can recover from losing up to 50% of shreds in a batch
+//! - Optimal 32:32 ratio balances recovery capability with storage overhead
 //!
 //! +---------------------------------------------------------------------------------------------+
 //! | Data Shred                                                                                  |

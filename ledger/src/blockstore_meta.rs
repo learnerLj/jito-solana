@@ -1,3 +1,47 @@
+//! Blockstore Metadata Structures - Slot and Erasure Set Management
+//! 
+//! This module defines the core metadata structures used by the blockstore to track
+//! slot completion, data integrity, and erasure coding information. These structures
+//! are essential for maintaining blockchain consistency and enabling efficient data
+//! recovery in the presence of network packet loss or storage failures.
+//! 
+//! ## Key Data Structures
+//! 
+//! - **SlotMeta**: Tracks slot completion status and shred connectivity
+//! - **ErasureMeta**: Manages Reed-Solomon erasure coding metadata  
+//! - **CompletedDataIndexes**: Efficiently tracks which data shreds are present
+//! - **ConnectedFlags**: Indicates slot connectivity to main blockchain fork
+//! 
+//! ## Slot Lifecycle Management
+//! 
+//! The metadata structures track slots through their lifecycle:
+//! 1. **Creation**: New slot metadata initialized when first shred arrives
+//! 2. **Population**: Data and coding shreds incrementally fill the slot
+//! 3. **Completion**: Slot marked complete when all required shreds present
+//! 4. **Connection**: Slot connected to blockchain when parent is connected
+//! 5. **Finalization**: Slot becomes immutable when rooted by consensus
+//! 
+//! ## Performance Optimizations
+//! 
+//! - **BitVec Implementation**: CompletedDataIndexesV2 uses efficient bit vectors
+//! - **Fast Lookups**: O(1) queries for shred presence and slot status
+//! - **Compact Storage**: Minimal memory footprint for metadata persistence
+//! - **Lazy Evaluation**: Deferred computation of expensive operations
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Check if slot is complete and connected
+//! let slot_meta = blockstore.meta(slot)?;
+//! if slot_meta.is_connected() && slot_meta.is_complete() {
+//!     // Process complete slot
+//! }
+//! 
+//! // Track data shred completion
+//! let mut indexes = CompletedDataIndexesV2::default();
+//! indexes.insert(shred_index);
+//! ```
+
 use {
     crate::{
         bit_vec::BitVec,
@@ -16,7 +60,11 @@ use {
 
 bitflags! {
     #[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-    /// Flags to indicate whether a slot is a descendant of a slot on the main fork
+    /// Connection status flags for blockchain slot ancestry tracking
+    /// 
+    /// These flags indicate whether a slot is properly connected to the main blockchain
+    /// fork through a validated chain of parent-child relationships. Connection status
+    /// is critical for consensus validation and fork resolution.
     pub struct ConnectedFlags:u8 {
         // A slot S should be considered to be connected if:
         // 1) S is a rooted slot itself OR
@@ -51,16 +99,29 @@ impl Default for ConnectedFlags {
     }
 }
 
-/// Legacy completed data indexes type; de/serialization is inefficient for a BTreeSet.
-///
-/// Replaced by [`CompletedDataIndexesV2`].
+/// Legacy completed data indexes using BTreeSet (V1)
+/// 
+/// Original implementation using BTreeSet for tracking completed data shred indexes.
+/// While functional, this approach has poor serialization performance and higher
+/// memory overhead compared to the BitVec-based V2 implementation.
+/// 
+/// **Deprecated**: Use [`CompletedDataIndexesV2`] for better performance.
 pub type CompletedDataIndexesV1 = BTreeSet<u32>;
-/// A fixed size BitVec offers fast lookup and fast de/serialization.
-///
-/// Supersedes [`CompletedDataIndexesV1`].
+
+/// High-performance completed data indexes using BitVec (V2)
+/// 
+/// Optimized implementation using a fixed-size bit vector for tracking which data
+/// shreds have been received for a slot. This provides O(1) lookup performance,
+/// fast serialization/deserialization, and minimal memory footprint.
+/// 
+/// The bit vector has a fixed capacity of MAX_DATA_SHREDS_PER_SLOT, enabling
+/// constant-time operations and predictable memory usage patterns.
+/// 
+/// **Supersedes**: [`CompletedDataIndexesV1`] with significant performance improvements.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct CompletedDataIndexesV2 {
+    /// Bit vector tracking presence of data shreds by index
     index: BitVec<MAX_DATA_SHREDS_PER_SLOT>,
 }
 

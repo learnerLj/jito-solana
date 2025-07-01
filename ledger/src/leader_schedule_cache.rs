@@ -1,3 +1,39 @@
+//! Leader Schedule Cache - High-Performance Validator Rotation Management
+//! 
+//! The leader schedule cache implements efficient caching and lookup mechanisms for
+//! validator rotation schedules across epochs. It provides fast access to leader
+//! information required for consensus operations, block validation, and network
+//! coordination while maintaining consistency with stake-weighted randomization.
+//! 
+//! ## Core Functionality
+//! 
+//! - **Epoch Schedule Caching**: Pre-computed leader schedules for current and future epochs
+//! - **Fast Leader Lookup**: O(1) slot-to-leader mapping for consensus validation
+//! - **Stake Weight Integration**: Proper weighting based on validator stake amounts
+//! - **Memory Management**: LRU eviction policy to limit memory usage
+//! - **Bank Integration**: Seamless integration with runtime bank state
+//! 
+//! ## Performance Optimizations
+//! 
+//! - **Read-Write Locks**: Concurrent access for high-throughput leader queries
+//! - **Bounded Cache**: Configurable cache size to prevent memory exhaustion
+//! - **Pre-computation**: Leader schedules calculated in advance of epoch boundaries
+//! - **Arc Sharing**: Reference-counted sharing to minimize memory duplication
+//! - **Fixed Schedule Support**: Optional fixed schedules for testing and development
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Create cache from bank state
+//! let cache = LeaderScheduleCache::new_from_bank(&bank);
+//! 
+//! // Get leader for specific slot
+//! let leader = cache.slot_leader_at(slot, Some(&bank))?;
+//! 
+//! // Check if node is leader for upcoming slots
+//! let slots = cache.get_upcoming_slots(&pubkey, slot, 10);
+//! ```
+
 use {
     crate::{
         blockstore::Blockstore,
@@ -16,23 +52,50 @@ use {
     },
 };
 
+/// Type alias for cached leader schedules storage
+/// 
+/// Tuple containing:
+/// - HashMap: Maps epochs to their corresponding leader schedules
+/// - VecDeque: LRU eviction queue tracking access order for memory management
 type CachedSchedules = (HashMap<Epoch, Arc<LeaderSchedule>>, VecDeque<u64>);
+
+/// Maximum number of leader schedules to cache simultaneously
+/// 
+/// This limit prevents unbounded memory growth while ensuring adequate
+/// coverage for current and upcoming epochs during normal operation.
 const MAX_SCHEDULES: usize = 10;
 
+/// Configurable cache capacity wrapper for leader schedule storage
+/// 
+/// Encapsulates the maximum number of leader schedules that can be cached
+/// simultaneously, providing configurability while maintaining reasonable defaults.
 struct CacheCapacity(usize);
+
 impl Default for CacheCapacity {
     fn default() -> Self {
         CacheCapacity(MAX_SCHEDULES)
     }
 }
 
+/// High-performance cache for validator leader schedules across epochs
+/// 
+/// Maintains pre-computed leader schedules for efficient slot-to-leader lookups
+/// during consensus operations. Uses LRU eviction and read-write locks for
+/// optimal performance in high-throughput scenarios.
+/// 
+/// The cache automatically manages memory usage by limiting the number of
+/// cached schedules and provides seamless integration with bank state updates.
 #[derive(Default)]
 pub struct LeaderScheduleCache {
-    // Map from an epoch to a leader schedule for that epoch
+    /// Thread-safe storage for cached leader schedules indexed by epoch
     pub cached_schedules: RwLock<CachedSchedules>,
+    /// Epoch configuration defining slot boundaries and timing
     epoch_schedule: EpochSchedule,
+    /// Highest epoch for which a schedule has been cached
     max_epoch: RwLock<Epoch>,
+    /// Maximum number of schedules to cache before eviction
     max_schedules: CacheCapacity,
+    /// Optional fixed schedule for testing and development scenarios
     fixed_schedule: Option<Arc<FixedSchedule>>,
 }
 

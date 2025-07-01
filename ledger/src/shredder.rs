@@ -1,3 +1,46 @@
+//! Shredder - High-Performance Shred Creation with Reed-Solomon Encoding
+//! 
+//! The shredder module implements the core logic for converting blockchain entries into
+//! shreds with Reed-Solomon erasure coding for fault tolerance. It provides high-performance
+//! parallel processing capabilities for encoding transaction data into network-optimized
+//! packets that can survive network packet loss and hardware failures.
+//! 
+//! ## Key Responsibilities
+//! 
+//! - **Entry-to-Shred Conversion**: Transform blockchain entries into MTU-sized data packets
+//! - **Reed-Solomon Encoding**: Generate erasure-coded redundancy shreds for fault tolerance
+//! - **Parallel Processing**: Multi-threaded shred creation for optimal throughput
+//! - **Cache Management**: Efficient Reed-Solomon encoder caching for performance
+//! - **Signature Integration**: Cryptographic signing of all generated shreds
+//! 
+//! ## Erasure Coding Strategy
+//! 
+//! The shredder implements adaptive erasure coding with optimized batch sizes:
+//! - Default 32:32 ratio (32 data + 32 coding shreds) for maximum fault tolerance
+//! - Dynamic batch sizing based on data volume for efficiency
+//! - Systematic codes preserve original data while adding redundancy
+//! - Recovery capability up to 50% packet loss per batch
+//! 
+//! ## Performance Optimizations
+//! 
+//! - **Thread Pool**: Dedicated Rayon thread pool for parallel shred processing
+//! - **Reed-Solomon Cache**: LRU cache of pre-computed encoding matrices
+//! - **Batch Processing**: Optimal grouping of entries for encoding efficiency
+//! - **Memory Management**: Zero-copy operations where possible for large data sets
+//! 
+//! ## Usage Patterns
+//! 
+//! ```rust
+//! // Create shredder for specific slot
+//! let shredder = Shredder::new(slot, parent_slot, reference_tick, version)?;
+//! 
+//! // Convert entries to shreds with erasure coding
+//! let shreds: Vec<Shred> = shredder.make_merkle_shreds_from_entries(
+//!     keypair, entries, is_last_in_slot, chained_merkle_root,
+//!     next_shred_index, next_code_index, &reed_solomon_cache, &mut stats
+//! ).collect();
+//! ```
+
 use {
     crate::shred::{
         self, Error, ProcessShredsStats, Shred, ShredData, ShredFlags, DATA_SHREDS_PER_FEC_BLOCK,
@@ -30,8 +73,14 @@ static PAR_THREAD_POOL: std::sync::LazyLock<ThreadPool> = std::sync::LazyLock::n
         .unwrap()
 });
 
-// Maps number of data shreds to the optimal erasure batch size which has the
-// same recovery probabilities as a 32:32 erasure batch.
+/// Optimal erasure batch sizes for different data shred counts
+/// 
+/// This lookup table maps the number of data shreds to the optimal erasure batch size
+/// that provides equivalent recovery probabilities to a 32:32 erasure batch.
+/// The values are pre-computed to balance fault tolerance with storage efficiency.
+/// 
+/// For example, with 8 data shreds, using 32 coding shreds provides the same
+/// recovery probability as the standard 32:32 configuration.
 pub(crate) const ERASURE_BATCH_SIZE: [usize; 33] = [
     0, 18, 20, 22, 23, 25, 27, 28, 30, // 8
     32, 33, 35, 36, 38, 39, 41, 42, // 16
@@ -39,10 +88,21 @@ pub(crate) const ERASURE_BATCH_SIZE: [usize; 33] = [
     55, 56, 58, 59, 60, 62, 63, 64, // 32
 ];
 
-// Arc<...> wrapper so that cache entries can be initialized without locking
-// the entire cache.
+/// Thread-safe LRU cache type for Reed-Solomon encoders
+/// 
+/// Uses Arc<OnceLock<V>> wrapper to enable lazy initialization of cache entries
+/// without locking the entire cache. This allows concurrent access to different
+/// cache entries while maintaining thread safety for initialization.
 type LruCacheOnce<K, V> = RwLock<LruCache<K, Arc<OnceLock<V>>>>;
 
+/// High-performance cache for Reed-Solomon encoders
+/// 
+/// Maintains a thread-safe LRU cache of Reed-Solomon encoders keyed by
+/// (data_shards, parity_shards) configuration. This avoids the expensive
+/// initialization of Reed-Solomon matrices for common encoding patterns.
+/// 
+/// The cache stores Result types to handle encoder creation failures gracefully,
+/// preventing repeated failed initialization attempts for invalid configurations.
 pub struct ReedSolomonCache(
     LruCacheOnce<
         (usize, usize), // number of {data,parity} shards
@@ -50,11 +110,24 @@ pub struct ReedSolomonCache(
     >,
 );
 
+/// High-performance shred creation engine
+/// 
+/// The Shredder converts blockchain entries into shreds with Reed-Solomon erasure coding.
+/// It maintains slot-specific configuration and provides optimized parallel processing
+/// for creating both data and coding shreds with cryptographic signatures.
+/// 
+/// Each shredder instance is configured for a specific slot and maintains consistency
+/// across all shreds generated for that slot, including parent slot relationships
+/// and version information required for consensus validation.
 #[derive(Debug)]
 pub struct Shredder {
+    /// Target slot for all generated shreds
     slot: Slot,
+    /// Parent slot for blockchain ancestry tracking
     parent_slot: Slot,
+    /// Shred version for network compatibility
     version: u16,
+    /// Reference tick for timing validation
     reference_tick: u8,
 }
 
