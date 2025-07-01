@@ -1,75 +1,127 @@
+/// Re-export parsed account types for client consumption
 pub use solana_account_decoder_client_types::ParsedAccount;
+
 use {
+    // Import all specialized parsers for different account types
     crate::{
         parse_address_lookup_table::parse_address_lookup_table,
-        parse_bpf_loader::parse_bpf_upgradeable_loader, parse_config::parse_config,
-        parse_nonce::parse_nonce, parse_stake::parse_stake, parse_sysvar::parse_sysvar,
-        parse_token::parse_token_v3, parse_vote::parse_vote,
+        parse_bpf_loader::parse_bpf_upgradeable_loader, 
+        parse_config::parse_config,
+        parse_nonce::parse_nonce, 
+        parse_stake::parse_stake, 
+        parse_sysvar::parse_sysvar,
+        parse_token::parse_token_v3, 
+        parse_vote::parse_vote,
     },
-    inflector::Inflector,
+    inflector::Inflector,                           // For converting enum names to kebab-case
     solana_clock::UnixTimestamp,
     solana_instruction::error::InstructionError,
     solana_pubkey::Pubkey,
+    // Solana program IDs for identifying account types by owner
     solana_sdk_ids::{
         address_lookup_table, bpf_loader_upgradeable, config, stake, system_program, sysvar, vote,
     },
+    // SPL Token 2022 extension types for additional parsing context
     spl_token_2022::extension::{
-        interest_bearing_mint::InterestBearingConfig, scaled_ui_amount::ScaledUiAmountConfig,
+        interest_bearing_mint::InterestBearingConfig, 
+        scaled_ui_amount::ScaledUiAmountConfig,
     },
     std::collections::HashMap,
     thiserror::Error,
 };
 
+/// Global registry mapping program IDs to their parsable account types
+/// 
+/// This static map enables the account decoder to identify which parser
+/// to use for a given account based on its owner program ID. The map is
+/// lazily initialized and cached for efficient lookup.
 pub static PARSABLE_PROGRAM_IDS: std::sync::LazyLock<HashMap<Pubkey, ParsableAccount>> =
     std::sync::LazyLock::new(|| {
         let mut m = HashMap::new();
+        
+        // Address Lookup Tables for transaction compression
         m.insert(
             address_lookup_table::id(),
             ParsableAccount::AddressLookupTable,
         );
+        
+        // BPF upgradeable loader for smart contracts
         m.insert(
             bpf_loader_upgradeable::id(),
             ParsableAccount::BpfUpgradeableLoader,
         );
+        
+        // Configuration accounts (deprecated)
         m.insert(config::id(), ParsableAccount::Config);
+        
+        // System program handles nonce accounts among others
         m.insert(system_program::id(), ParsableAccount::Nonce);
+        
+        // SPL Token (original) and Token-2022 programs
         m.insert(spl_token::id(), ParsableAccount::SplToken);
         m.insert(spl_token_2022::id(), ParsableAccount::SplToken2022);
+        
+        // Stake program for Proof of Stake consensus
         m.insert(stake::id(), ParsableAccount::Stake);
+        
+        // System variables (sysvars) for cluster state
         m.insert(sysvar::id(), ParsableAccount::Sysvar);
+        
+        // Vote program for validator consensus
         m.insert(vote::id(), ParsableAccount::Vote);
+        
         m
     });
 
+/// Errors that can occur during account parsing
 #[derive(Error, Debug)]
 pub enum ParseAccountError {
+    /// The account type is recognized but the specific data cannot be parsed
     #[error("{0:?} account not parsable")]
     AccountNotParsable(ParsableAccount),
 
+    /// The program owner is not in the list of parsable programs
     #[error("Program not parsable")]
     ProgramNotParsable,
 
+    /// Required additional context data is missing (e.g., token decimals)
     #[error("Additional data required to parse: {0}")]
     AdditionalDataMissing(String),
 
+    /// Error occurred during account data deserialization
     #[error("Instruction error")]
     InstructionError(#[from] InstructionError),
 
+    /// Error occurred during JSON serialization of parsed data
     #[error("Serde json error")]
     SerdeJsonError(#[from] serde_json::error::Error),
 }
 
+/// Enumeration of all supported parsable account types
+/// 
+/// This enum identifies the different types of Solana accounts that
+/// the decoder can parse into structured formats. Each variant
+/// corresponds to a specific program type.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ParsableAccount {
+    /// Address lookup tables for transaction compression
     AddressLookupTable,
+    /// BPF upgradeable loader accounts for smart contracts
     BpfUpgradeableLoader,
+    /// Configuration accounts (deprecated)
     Config,
+    /// Nonce accounts for durable transactions
     Nonce,
+    /// SPL Token (original) accounts
     SplToken,
+    /// SPL Token-2022 accounts with extensions
     SplToken2022,
+    /// Stake accounts for Proof of Stake
     Stake,
+    /// System variables (cluster state)
     Sysvar,
+    /// Vote accounts for validator consensus
     Vote,
 }
 
@@ -171,16 +223,41 @@ pub fn parse_account_data_v2(
     parse_account_data_v3(pubkey, program_id, data, additional_data.map(Into::into))
 }
 
+/// Parse account data into a structured, UI-friendly format
+/// 
+/// This is the main entry point for converting raw account data into
+/// a structured `ParsedAccount` that can be easily consumed by clients.
+/// It identifies the account type based on the owner program and delegates
+/// to the appropriate specialized parser.
+/// 
+/// # Arguments
+/// * `pubkey` - The account's public key (address)
+/// * `program_id` - The program that owns this account
+/// * `data` - The raw account data to parse
+/// * `additional_data` - Optional context data needed for certain parsers
+/// 
+/// # Returns
+/// A `ParsedAccount` containing the structured account information
+/// 
+/// # Errors
+/// Returns `ParseAccountError` if:
+/// - The program is not in the list of parsable programs
+/// - The account data cannot be parsed by the appropriate parser
+/// - Required additional data is missing
 pub fn parse_account_data_v3(
     pubkey: &Pubkey,
     program_id: &Pubkey,
     data: &[u8],
     additional_data: Option<AccountAdditionalDataV3>,
 ) -> Result<ParsedAccount, ParseAccountError> {
+    // Look up the appropriate parser for this program type
     let program_name = PARSABLE_PROGRAM_IDS
         .get(program_id)
         .ok_or(ParseAccountError::ProgramNotParsable)?;
+    
     let additional_data = additional_data.unwrap_or_default();
+    
+    // Route to the appropriate specialized parser based on program type
     let parsed_json = match program_name {
         ParsableAccount::AddressLookupTable => {
             serde_json::to_value(parse_address_lookup_table(data)?)?
@@ -190,6 +267,7 @@ pub fn parse_account_data_v3(
         }
         ParsableAccount::Config => serde_json::to_value(parse_config(data, pubkey)?)?,
         ParsableAccount::Nonce => serde_json::to_value(parse_nonce(data)?)?,
+        // Both SPL Token variants use the same parser
         ParsableAccount::SplToken | ParsableAccount::SplToken2022 => serde_json::to_value(
             parse_token_v3(data, additional_data.spl_token_additional_data.as_ref())?,
         )?,
@@ -197,10 +275,12 @@ pub fn parse_account_data_v3(
         ParsableAccount::Sysvar => serde_json::to_value(parse_sysvar(data, pubkey)?)?,
         ParsableAccount::Vote => serde_json::to_value(parse_vote(data)?)?,
     };
+    
+    // Construct the final parsed account representation
     Ok(ParsedAccount {
-        program: format!("{program_name:?}").to_kebab_case(),
-        parsed: parsed_json,
-        space: data.len() as u64,
+        program: format!("{program_name:?}").to_kebab_case(), // Convert to kebab-case for UI
+        parsed: parsed_json,                                   // The structured account data
+        space: data.len() as u64,                             // Account data size
     })
 }
 
