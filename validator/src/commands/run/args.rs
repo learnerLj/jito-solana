@@ -1,3 +1,17 @@
+/// CLI Argument Definitions for Validator Run Command
+/// 
+/// This module defines all command-line arguments available for the main validator
+/// run operation. It includes comprehensive argument definitions for all aspects
+/// of validator configuration, from basic network settings to advanced MEV features.
+/// 
+/// Argument categories include:
+/// - Identity and security (keypairs, voting configuration)
+/// - Network settings (ports, addresses, entry points)
+/// - Storage configuration (ledger, accounts, snapshots)
+/// - Performance tuning (thread counts, memory limits)
+/// - MEV integration (block engines, relayers, tip distribution)
+/// - Development features (debugging, testing, monitoring)
+
 use {
     crate::cli::{hash_validator, port_range_validator, port_validator, DefaultArgs},
     clap::{App, Arg},
@@ -27,6 +41,24 @@ use {
 const EXCLUDE_KEY: &str = "account-index-exclude-key";
 const INCLUDE_KEY: &str = "account-index-include-key";
 
+/// Add all validator run command arguments to the CLI application
+/// 
+/// This function builds the complete argument set for the validator run command,
+/// including all configuration options needed for full validator operation.
+/// Each argument includes appropriate validation, help text, and default values.
+/// 
+/// The function creates a comprehensive CLI interface that supports:
+/// - Basic validator operation (identity, voting, network setup)
+/// - Advanced configuration (performance tuning, storage optimization)
+/// - MEV features (block engines, relayers, tip distribution)
+/// - Development tools (debugging, testing, monitoring)
+/// 
+/// # Arguments
+/// * `app` - The base CLI application to extend with validator arguments
+/// * `default_args` - Default values for all configuration options
+/// 
+/// # Returns
+/// Extended CLI application with all validator run arguments configured
 pub fn add_args<'a>(app: App<'a, 'a>, default_args: &'a DefaultArgs) -> App<'a, 'a> {
     app
     .arg(

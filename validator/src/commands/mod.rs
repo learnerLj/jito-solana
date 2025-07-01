@@ -1,3 +1,40 @@
+/// Validator Administrative Commands Module
+/// 
+/// This module contains all subcommands available for validator operation and administration.
+/// Each subcommand provides specific functionality for managing different aspects of a
+/// running or offline validator instance.
+/// 
+/// Command categories:
+/// 
+/// **Core Operations:**
+/// - `run`: Main validator operation (transaction processing, consensus participation)
+/// - `monitor`: Real-time status monitoring and performance dashboards
+/// - `exit`: Graceful validator shutdown
+/// 
+/// **Identity & Security:**
+/// - `authorized_voter`: Manage voting keypairs for consensus participation
+/// - `set_identity`: Update validator identity keypair for network identification
+/// 
+/// **Network Configuration:**
+/// - `contact_info`: Display validator network contact information
+/// - `set_public_address`: Configure public network addresses for external access
+/// - `repair_shred_from_peer`: Request specific ledger data repair from network peers
+/// - `repair_whitelist`: Manage trusted peer list for ledger repair operations
+/// 
+/// **MEV Integration (Jito-specific):**
+/// - `block_engine`: Configure connection to MEV block construction engine
+/// - `relayer`: Set up transaction relayer for MEV transaction forwarding
+/// - `shred`: Configure specialized shred routing for MEV optimization
+/// 
+/// **Plugin Management:**
+/// - `plugin`: Manage Geyser plugins for custom transaction/account processing
+/// - `runtime_plugin`: Configure runtime plugins for transaction execution hooks
+/// 
+/// **Advanced Administration:**
+/// - `set_log_filter`: Adjust logging verbosity at runtime
+/// - `staked_nodes_overrides`: Override stake weights for specific validators
+/// - `wait_for_restart_window`: Wait for optimal cluster restart timing
+
 pub mod authorized_voter;
 pub mod block_engine;
 pub mod contact_info;

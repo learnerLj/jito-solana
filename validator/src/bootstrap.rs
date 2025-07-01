@@ -691,7 +691,17 @@ pub fn rpc_bootstrap(
 
 /// Get RPC peer node candidates to download from.
 ///
-/// This function finds the highest compatible snapshots from the cluster and returns RPC peers.
+/// This function is the core of the bootstrap process, responsible for finding
+/// compatible RPC peers in the cluster that can provide genesis and snapshot data.
+/// 
+/// The function implements a sophisticated peer selection algorithm:
+/// 1. Discovers RPC peers through gossip protocol
+/// 2. Filters peers based on shred version compatibility  
+/// 3. Finds the highest available snapshot slots from known validators
+/// 4. Returns peers that have the most recent compatible snapshots
+/// 
+/// This ensures the validator bootstraps from the most up-to-date cluster state
+/// while maintaining compatibility with the target network configuration.
 fn get_rpc_nodes(
     cluster_info: &ClusterInfo,
     validator_config: &ValidatorConfig,

@@ -1,4 +1,18 @@
-//! Arguments for controlling the number of threads allocated for various tasks
+//! Thread Configuration Management for Validator Performance Tuning
+//! 
+//! This module provides comprehensive thread pool configuration for the Jito-Solana validator.
+//! It defines CLI arguments and parsing logic for all thread pools used throughout the validator,
+//! enabling fine-tuned performance optimization for different workloads and hardware configurations.
+//! 
+//! The validator uses multiple specialized thread pools:
+//! - Database operations (AccountsDB cleaning, hashing, foreground tasks)
+//! - Network operations (TVU receive, retransmit, signature verification)
+//! - Storage operations (RocksDB compaction and flushing)
+//! - Service threads (IP echo server, replay processing)
+//! - Global thread pool (Rayon parallel processing)
+//! 
+//! Proper thread configuration is critical for validator performance, especially on
+//! high-core-count systems where default thread allocation may not be optimal.
 
 use {
     clap::{value_t_or_exit, Arg, ArgMatches},
@@ -8,7 +22,14 @@ use {
     std::{num::NonZeroUsize, ops::RangeInclusive},
 };
 
-// Need this struct to provide &str whose lifetime matches that of the CLAP Arg's
+/// Default thread count values for all validator thread pools
+/// 
+/// This struct holds string representations of default thread counts for each
+/// validator subsystem. String format is required for CLAP integration to ensure
+/// proper lifetime management of default values.
+/// 
+/// Each field corresponds to a specific validator subsystem that benefits from
+/// dedicated thread pool configuration for optimal performance.
 pub struct DefaultThreadArgs {
     pub accounts_db_clean_threads: String,
     pub accounts_db_foreground_threads: String,
@@ -48,6 +69,17 @@ impl Default for DefaultThreadArgs {
     }
 }
 
+/// Generate CLI arguments for all thread pool configuration options
+/// 
+/// This function creates the complete set of CLAP arguments for configuring
+/// thread pools throughout the validator. Each argument includes validation,
+/// help text, and appropriate default values based on system characteristics.
+/// 
+/// # Arguments
+/// * `defaults` - Default values for all thread pool arguments
+/// 
+/// # Returns
+/// Vector of configured CLAP arguments ready for inclusion in the CLI
 pub fn thread_args<'a>(defaults: &DefaultThreadArgs) -> Vec<Arg<'_, 'a>> {
     vec![
         new_thread_arg::<AccountsDbCleanThreadsArg>(&defaults.accounts_db_clean_threads),
@@ -77,6 +109,15 @@ fn new_thread_arg<'a, T: ThreadArg>(default: &str) -> Arg<'_, 'a> {
         .help(T::HELP)
 }
 
+/// Parsed and validated thread configuration for all validator subsystems
+/// 
+/// This struct contains the final thread pool configuration values after CLI parsing
+/// and validation. All values are guaranteed to be valid (non-zero) and within
+/// acceptable ranges for the current system.
+/// 
+/// These values are used throughout validator initialization to configure the
+/// various thread pools for optimal performance based on user preferences
+/// and system capabilities.
 pub struct NumThreadConfig {
     pub accounts_db_clean_threads: NonZeroUsize,
     pub accounts_db_foreground_threads: NonZeroUsize,
@@ -93,6 +134,20 @@ pub struct NumThreadConfig {
     pub tvu_sigverify_threads: NonZeroUsize,
 }
 
+/// Parse thread configuration from command-line arguments
+/// 
+/// Extracts and validates thread pool configuration from parsed CLI arguments.
+/// All values are validated to ensure they are within acceptable ranges for
+/// the current system and converted to NonZeroUsize for safe usage.
+/// 
+/// # Arguments
+/// * `matches` - Parsed command-line arguments from CLAP
+/// 
+/// # Returns
+/// Validated thread configuration ready for use in validator initialization
+/// 
+/// # Panics
+/// Panics if any thread count argument is invalid (should not happen due to CLAP validation)
 pub fn parse_num_threads_args(matches: &ArgMatches) -> NumThreadConfig {
     NumThreadConfig {
         accounts_db_clean_threads: value_t_or_exit!(

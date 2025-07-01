@@ -1,3 +1,21 @@
+/// Real-Time Validator Dashboard
+/// 
+/// This module implements a comprehensive monitoring dashboard for the Jito-Solana validator.
+/// The dashboard provides real-time visibility into validator status, performance metrics,
+/// and network connectivity through a console-based interface.
+/// 
+/// Features:
+/// - Live slot progression (processed, confirmed, finalized)
+/// - Transaction throughput monitoring
+/// - Network health and connectivity status
+/// - Snapshot status and progress tracking
+/// - Validator identity and version information
+/// - Uptime tracking and performance metrics
+/// 
+/// The dashboard connects to the validator through the admin RPC interface and
+/// automatically refreshes data at configurable intervals. It gracefully handles
+/// connection failures and validator restarts.
+
 use {
     crate::{
         admin_rpc_service, format_name_value, new_spinner_progress_bar, println_name_value,

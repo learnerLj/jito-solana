@@ -1,3 +1,24 @@
+/// Admin RPC Service for Runtime Validator Management
+/// 
+/// This module implements a comprehensive administrative interface for managing
+/// a running Jito-Solana validator through JSON-RPC calls. The service enables
+/// real-time configuration updates, monitoring, and control without requiring
+/// validator restarts.
+/// 
+/// Key capabilities:
+/// - Identity and voting keypair management
+/// - Network configuration updates (public addresses, repair settings)
+/// - MEV configuration (block engine, relayer endpoints)
+/// - Plugin lifecycle management (load, unload, reload Geyser plugins)
+/// - Runtime parameter adjustments (log levels, staking overrides)
+/// - Status monitoring and health checks
+/// 
+/// The service uses IPC (named pipes/Unix sockets) for secure local communication
+/// and implements proper authentication and validation for all operations.
+/// 
+/// Security note: This interface is designed for local administrative access only
+/// and should not be exposed to external networks.
+
 use {
     crossbeam_channel::Sender,
     jsonrpc_core::{BoxFuture, ErrorCode, MetaIoHandler, Metadata, Result},

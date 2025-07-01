@@ -95,6 +95,29 @@ pub enum Operation {
 
 const MILLIS_PER_SECOND: u64 = 1000;
 
+/// Execute the validator run command - the core entry point for validator operations
+/// 
+/// This function orchestrates the complete validator startup and operational workflow.
+/// It handles both initialization (`init`) and runtime (`run`) operations, setting up
+/// all necessary components for a fully functional Jito-Solana validator.
+/// 
+/// Execution flow:
+/// 1. **Configuration Parsing**: Extract and validate all CLI arguments
+/// 2. **Identity Setup**: Load validator identity and voting keypairs  
+/// 3. **Storage Initialization**: Configure account storage and ledger paths
+/// 4. **Network Bootstrap**: Connect to cluster and download latest state (if needed)
+/// 5. **Service Startup**: Initialize all validator services (RPC, gossip, TPU, TVU)
+/// 6. **MEV Integration**: Configure block engine and relayer connections
+/// 7. **Consensus Participation**: Begin voting and transaction processing
+/// 
+/// The function supports two operation modes:
+/// - `Initialize`: Prepare ledger and configuration, then exit
+/// - `Run`: Full validator operation with all services active
+/// 
+/// MEV-specific features:
+/// - Block engine integration for optimized transaction ordering
+/// - Relayer configuration for transaction forwarding
+/// - Tip distribution and bundle processing capabilities
 pub fn execute(
     matches: &ArgMatches,
     solana_version: &str,

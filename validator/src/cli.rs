@@ -1,3 +1,20 @@
+/// Command Line Interface Definition for Jito-Solana Validator
+/// 
+/// This module defines the complete command-line interface for the Jito-Solana validator,
+/// including all arguments, subcommands, and configuration options. It uses the `clap`
+/// library to provide comprehensive argument parsing with validation, help generation,
+/// and error handling.
+/// 
+/// The CLI supports:
+/// - Main validator operation arguments (identity, ledger, network settings)
+/// - MEV-specific configuration (block engine, relayer, tip distribution)
+/// - Performance tuning options (thread counts, memory limits, CPU affinity)
+/// - Development and testing features (test validator, debugging options)
+/// - Administrative commands (monitoring, plugin management, maintenance)
+/// 
+/// All arguments include detailed help text, validation rules, and sensible defaults
+/// to provide a user-friendly experience while maintaining flexibility for advanced users.
+
 use {
     crate::commands,
     clap::{crate_description, crate_name, App, AppSettings, Arg, ArgMatches, SubCommand},
@@ -60,6 +77,26 @@ const DEFAULT_PREALLOCATED_BUNDLE_COST: u64 = 3000000;
 const DEFAULT_RELAYER_EXPECTED_HEARTBEAT_INTERVAL_MS: u64 = 500;
 const DEFAULT_RELAYER_MAX_FAILED_HEARTBEATS: u64 = 3;
 
+/// Build the complete CLI application with all subcommands and arguments
+/// 
+/// This function constructs the main CLI application structure using clap, defining
+/// all validator subcommands, arguments, and their validation rules. It creates a
+/// comprehensive interface that supports both basic validator operations and advanced
+/// MEV functionality.
+/// 
+/// The resulting app handles:
+/// - Argument parsing and validation
+/// - Help text generation
+/// - Subcommand routing
+/// - Default value management
+/// - Input validation and error reporting
+/// 
+/// # Arguments
+/// * `version` - Version string to display in help/version output
+/// * `default_args` - Default values for all CLI arguments
+/// 
+/// # Returns
+/// A configured clap App ready for argument parsing
 pub fn app<'a>(version: &'a str, default_args: &'a DefaultArgs) -> App<'a, 'a> {
     let app = App::new(crate_name!())
         .about(crate_description!())
@@ -99,23 +136,34 @@ pub fn app<'a>(version: &'a str, default_args: &'a DefaultArgs) -> App<'a, 'a> {
         .after_help("The default subcommand is run")
 }
 
-/// Deprecated argument description should be moved into the [`deprecated_arguments()`] function,
-/// expressed as an instance of this type.
+/// Structure for managing deprecated CLI arguments with migration guidance
+/// 
+/// This struct provides a standardized way to handle deprecated command-line arguments
+/// while providing clear migration paths for users. It supports hiding deprecated
+/// arguments by default while still processing them for backward compatibility.
+/// 
+/// The system helps maintain CLI stability during transitions by:
+/// - Hiding deprecated arguments unless explicitly requested
+/// - Providing clear replacement suggestions
+/// - Offering detailed migration guidance
+/// - Maintaining backward compatibility during transition periods
 struct DeprecatedArg {
-    /// Deprecated argument description, moved here as is.
-    ///
-    /// `hidden` property will be modified by [`deprecated_arguments()`] to only show this argument
-    /// if [`hidden_unless_forced()`] says they should be displayed.
+    /// The deprecated argument definition
+    /// 
+    /// This contains the original argument specification, which will be automatically
+    /// hidden unless the user requests to see deprecated options.
     arg: Arg<'static, 'static>,
 
-    /// If simply replaced by a different argument, this is the name of the replacement.
-    ///
-    /// Content should be an argument name, as presented to users.
+    /// Name of the replacement argument (if any)
+    /// 
+    /// When a deprecated argument has a direct replacement, this field specifies
+    /// the new argument name to guide user migration.
     replaced_by: Option<&'static str>,
 
-    /// An explanation to be shown to the user if they still use this argument.
-    ///
-    /// Content should be a complete sentence or several, ending with a period.
+    /// Detailed explanation for users about the deprecation
+    /// 
+    /// This provides context about why the argument was deprecated and how users
+    /// should adapt their usage. Should be a complete, user-friendly explanation.
     usage_warning: Option<&'static str>,
 }
 
