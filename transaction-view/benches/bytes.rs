@@ -1,3 +1,41 @@
+//! # Compressed Integer Parsing Benchmarks
+//!
+//! This benchmark suite evaluates the performance of different approaches to parsing
+//! compressed u16 integers used throughout Solana's transaction format.
+//!
+//! ## Background
+//!
+//! Solana uses compressed encoding for array lengths and counts in transactions to
+//! save space. This encoding is critical for performance since it's used extensively
+//! throughout transaction parsing.
+//!
+//! ## Benchmark Comparison
+//!
+//! The benchmarks compare three approaches:
+//!
+//! 1. **`decode_shortu16_len`**: Legacy approach from solana-sdk
+//!    - General-purpose implementation
+//!    - Handles all possible u16 values
+//!    - More complex branching logic
+//!
+//! 2. **`read_compressed_u16`**: New general implementation
+//!    - Improved error handling
+//!    - Better bounds checking
+//!    - Still handles full u16 range
+//!
+//! 3. **`optimized_read_compressed_u16`**: Solana-optimized version
+//!    - Optimized for packet size constraints
+//!    - Limited to 2-byte maximum encoding
+//!    - Simplified branching for better performance
+//!
+//! ## Performance Considerations
+//!
+//! The optimized version leverages domain knowledge:
+//! - Transaction packets are limited to 1232 bytes
+//! - Array lengths cannot exceed packet size
+//! - Most values fit in 1-2 bytes, not 3
+//! - Reduced branching improves CPU pipeline efficiency
+
 use {
     agave_transaction_view::bytes::{optimized_read_compressed_u16, read_compressed_u16},
     bincode::{serialize_into, DefaultOptions, Options},

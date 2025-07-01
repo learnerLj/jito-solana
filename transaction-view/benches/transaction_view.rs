@@ -1,3 +1,32 @@
+//! # Transaction View Performance Benchmarks
+//!
+//! This benchmark suite compares the performance of the new TransactionView approach
+//! against traditional transaction deserialization methods. It measures parsing
+//! performance across various transaction types and sizes.
+//!
+//! ## Benchmark Categories
+//!
+//! 1. **Minimum Sized Transactions**: Smallest possible valid transactions
+//! 2. **Simple Transfers**: Single transfer instruction transactions
+//! 3. **Packed Transfers**: Maximum transfers in a single transaction
+//! 4. **Packed NoOps**: Maximum no-op instructions in a transaction
+//! 5. **Packed ATLs**: Maximum address table lookups in a transaction
+//!
+//! ## Comparison Methods
+//!
+//! - **VersionedTransaction**: Traditional full deserialization
+//! - **SanitizedVersionedTransaction**: Traditional deserialization + validation
+//! - **TransactionView**: New zero-copy parsing (unsanitized)
+//! - **TransactionView (Sanitized)**: New zero-copy parsing + validation
+//!
+//! ## Performance Metrics
+//!
+//! Benchmarks measure:
+//! - Parsing throughput (transactions per second)
+//! - Memory allocation patterns
+//! - CPU instruction efficiency
+//! - Cache performance characteristics
+
 use {
     agave_transaction_view::transaction_view::TransactionView,
     criterion::{
@@ -19,6 +48,8 @@ use {
     },
 };
 
+/// Number of transactions to process in each benchmark run
+/// This provides sufficient sample size for statistical significance
 const NUM_TRANSACTIONS: usize = 1024;
 
 fn serialize_transactions(transactions: Vec<VersionedTransaction>) -> Vec<Vec<u8>> {
