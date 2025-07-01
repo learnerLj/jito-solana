@@ -7,11 +7,44 @@ use {
     solana_transaction_error::TransactionError,
 };
 
-/// Process a message.
-/// This method calls each instruction in the message over the set of loaded accounts.
-/// For each instruction it calls the program entrypoint method and verifies that the result of
-/// the call does not violate the bank's accounting rules.
-/// The accounts are committed back to the bank only if every instruction succeeds.
+/// Process a transaction message by executing each instruction sequentially
+/// 
+/// This is the core function responsible for executing all instructions within a transaction
+/// message. It orchestrates the execution flow, manages compute units, and ensures proper
+/// accounting rules are followed.
+/// 
+/// # Process Flow
+/// 
+/// 1. **Instruction Setup**: For each instruction, prepare the account context including
+///    account indices, signer/writable permissions, and instruction-specific data
+/// 
+/// 2. **Execution Routing**: Determine whether the instruction targets a precompile or
+///    regular program and route accordingly
+/// 
+/// 3. **Compute Tracking**: Monitor compute unit consumption and update execution timings
+/// 
+/// 4. **Error Handling**: If any instruction fails, the entire transaction fails with
+///    proper error mapping to include instruction index
+/// 
+/// # Arguments
+/// 
+/// * `message` - The transaction message containing instructions to execute
+/// * `program_indices` - Mapping of instruction index to program account indices
+/// * `invoke_context` - Execution context containing loaded accounts and runtime state
+/// * `execute_timings` - Performance timing collector for metrics
+/// * `accumulated_consumed_units` - Running total of compute units consumed
+/// 
+/// # Returns
+/// 
+/// Returns `Ok(())` if all instructions execute successfully, or `Err(TransactionError)`
+/// if any instruction fails. The error includes the instruction index for debugging.
+/// 
+/// # Security
+/// 
+/// This function enforces Solana's security model by:
+/// - Validating account permissions (signer/writable status) 
+/// - Tracking compute unit limits to prevent DoS attacks
+/// - Ensuring atomic execution (all instructions succeed or transaction fails)
 pub(crate) fn process_message(
     message: &impl SVMMessage,
     program_indices: &[Vec<IndexOfAccount>],
@@ -19,16 +52,24 @@ pub(crate) fn process_message(
     execute_timings: &mut ExecuteTimings,
     accumulated_consumed_units: &mut u64,
 ) -> Result<(), TransactionError> {
+    // Ensure program indices array matches the number of instructions
     debug_assert_eq!(program_indices.len(), message.num_instructions());
+    
+    // Process each instruction in the transaction message sequentially
     for (top_level_instruction_index, ((program_id, instruction), program_indices)) in message
         .program_instructions_iter()
         .zip(program_indices.iter())
         .enumerate()
     {
+        // Build instruction account context for this specific instruction
+        // This maps transaction account indices to instruction-specific indices
         let mut instruction_accounts = Vec::with_capacity(instruction.accounts.len());
+        
         for (instruction_account_index, index_in_transaction) in
             instruction.accounts.iter().enumerate()
         {
+            // Calculate the index of this account within the instruction's view
+            // This handles cases where the same account appears multiple times in an instruction
             let index_in_callee = instruction
                 .accounts
                 .get(0..instruction_account_index)
@@ -37,19 +78,27 @@ pub(crate) fn process_message(
                 .position(|account_index| account_index == index_in_transaction)
                 .unwrap_or(instruction_account_index)
                 as IndexOfAccount;
+            
             let index_in_transaction = *index_in_transaction as usize;
+            
+            // Create the instruction account context with proper permissions
             instruction_accounts.push(InstructionAccount {
                 index_in_transaction: index_in_transaction as IndexOfAccount,
                 index_in_caller: index_in_transaction as IndexOfAccount,
                 index_in_callee,
-                is_signer: message.is_signer(index_in_transaction),
-                is_writable: message.is_writable(index_in_transaction),
+                is_signer: message.is_signer(index_in_transaction),    // Can this account sign?
+                is_writable: message.is_writable(index_in_transaction), // Can this account be modified?
             });
         }
 
+        // Track compute units consumed by this instruction
         let mut compute_units_consumed = 0;
+        
+        // Execute the instruction and measure execution time
         let (result, process_instruction_us) = measure_us!({
             if invoke_context.is_precompile(program_id) {
+                // Handle precompiled programs (native programs like ed25519, secp256k1)
+                // These are executed directly without loading from accounts
                 invoke_context.process_precompile(
                     program_id,
                     instruction.data,
@@ -58,6 +107,8 @@ pub(crate) fn process_message(
                     message.instructions_iter().map(|ix| ix.data),
                 )
             } else {
+                // Handle regular BPF programs loaded from accounts
+                // This includes user-deployed programs and most system programs
                 invoke_context.process_instruction(
                     instruction.data,
                     &instruction_accounts,
@@ -68,10 +119,12 @@ pub(crate) fn process_message(
             }
         });
 
+        // Update the running total of compute units consumed across all instructions
         *accumulated_consumed_units =
             accumulated_consumed_units.saturating_add(compute_units_consumed);
-        // The per_program_timings are only used for metrics reporting at the trace
-        // level, so they should only be accumulated when trace level is enabled.
+        
+        // Collect detailed performance metrics for program execution
+        // Only accumulate per-program timings when trace logging is enabled to avoid overhead
         if log::log_enabled!(log::Level::Trace) {
             execute_timings.details.accumulate_program(
                 program_id,
@@ -80,19 +133,28 @@ pub(crate) fn process_message(
                 result.is_err(),
             );
         }
+        
+        // Update timing information in the invoke context
+        // Reset the context timings after accumulating to prevent double-counting
         invoke_context.timings = {
             execute_timings.details.accumulate(&invoke_context.timings);
             ExecuteDetailsTimings::default()
         };
+        
+        // Track total time spent processing instructions
         execute_timings
             .execute_accessories
             .process_instructions
             .total_us += process_instruction_us;
 
+        // If this instruction failed, convert the error to include the instruction index
+        // This provides better debugging information by identifying which instruction failed
         result.map_err(|err| {
             TransactionError::InstructionError(top_level_instruction_index as u8, err)
         })?;
     }
+    
+    // All instructions executed successfully
     Ok(())
 }
 

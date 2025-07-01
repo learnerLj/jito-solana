@@ -16,12 +16,41 @@ use {
     solana_type_overrides::sync::Arc,
 };
 
+//! # Program Loading and Caching System
+//! 
+//! This module handles the loading, compilation, and caching of executable programs
+//! in the Solana Virtual Machine. It supports multiple loader versions and provides
+//! efficient caching to avoid recompilation of programs.
+//! 
+//! ## Loader Types Supported
+//! 
+//! - **Loader V1 (Deprecated)**: Legacy BPF loader with basic functionality
+//! - **Loader V2**: Standard BPF loader with improved security
+//! - **Loader V3 (Upgradeable)**: Upgradeable BPF loader allowing program updates
+//! - **Loader V4**: Latest loader with enhanced features and optimizations
+//! 
+//! ## Key Features
+//! 
+//! - **Program Compilation**: Compiles ELF bytecode to executable format
+//! - **Caching**: Maintains a cache of compiled programs to avoid recompilation
+//! - **Version Management**: Tracks program deployment slots for cache invalidation
+//! - **Security Validation**: Verifies program validity and loader compatibility
+
+/// Result of attempting to load program account data
+/// 
+/// This enum represents the different outcomes when loading a program account,
+/// categorized by loader type and validation status.
 #[derive(Debug)]
 pub(crate) enum ProgramAccountLoadResult {
+    /// Program account data is invalid or corrupted
     InvalidAccountData(ProgramCacheEntryOwner),
+    /// Program managed by deprecated Loader V1
     ProgramOfLoaderV1(AccountSharedData),
+    /// Program managed by standard Loader V2  
     ProgramOfLoaderV2(AccountSharedData),
+    /// Program managed by upgradeable Loader V3 (includes program + programdata accounts)
     ProgramOfLoaderV3(AccountSharedData, AccountSharedData, Slot),
+    /// Program managed by latest Loader V4
     ProgramOfLoaderV4(AccountSharedData, Slot),
 }
 
